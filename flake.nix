@@ -55,6 +55,7 @@
             pkgs.kdePackages.qtbase
             pkgs.libkeyfinder
             pkgs.fftw
+            pkgs.taglib   # for the dev-only keyanalyzer_cli tag write/check mode
           ];
           shellHook = ''
             export FOOYIN_DEV="${fooyinDev}"
@@ -62,6 +63,7 @@
             echo "Build:  cmake -S keyanalyzer -B build -DCMAKE_BUILD_TYPE=Release"
             echo "        -DFooyin_DIR=$FOOYIN_DEV/lib/cmake/fooyin"
             echo "        -DKeyFinder_DIR=${pkgs.libkeyfinder}/lib/cmake/KeyFinder"
+            echo "        [-DKEYANALYZER_BUILD_TOOLS=ON -DKEYANALYZER_BUILD_TESTS=ON]"
             echo "        && cmake --build build"
           '';
         };
