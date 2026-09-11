@@ -29,7 +29,8 @@ cached on that machine).
 
 ```sh
 # From this repo, with nix:
-nix develop --max-jobs 1 --cores 2
+# --impure so the devShell reuses the NixOS host's cached fooyin dev build
+nix develop --impure --max-jobs 1 --cores 2
 cmake -S keyanalyzer -B build -DCMAKE_BUILD_TYPE=Release \
       -DFooyin_DIR="$FOOYIN_DEV/lib/cmake/fooyin" \
       -DKeyFinder_DIR=<libkeyfinder>/lib/cmake/KeyFinder

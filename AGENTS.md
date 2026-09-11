@@ -25,7 +25,9 @@ NixOS host so you don't have to rediscover them.
 ## Quick build / test loop
 
 ```sh
-nix develop --max-jobs 1 --cores 2
+# NOTE: use --impure — the devShell picks the NixOS host's already-cached
+# fooyin dev build via builtins.pathExists, which is unavailable in pure eval.
+nix develop --impure --max-jobs 1 --cores 2
 cmake -S keyanalyzer -B build -DCMAKE_BUILD_TYPE=Release \
       -DFooyin_DIR="$FOOYIN_DEV/lib/cmake/fooyin" \
       -DKeyFinder_DIR=<libkeyfinder>/lib/cmake/KeyFinder
