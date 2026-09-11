@@ -39,7 +39,9 @@ public:
     ~KeyAnalyzerScanner() override;
 
     void close();
-    void scanTracks(const TrackList& tracks);
+    //! Scan @p tracks. When @p force is true, tracks that already have an
+    //! INITIALKEY tag are re-analyzed regardless of the skip-existing setting.
+    void scanTracks(const TrackList& tracks, bool force = false);
 
 signals:
     void scanningTrack(const QString& filepath);

@@ -37,6 +37,8 @@ QVariant KeyAnalyzerResultsModel::headerData(int section, Qt::Orientation orient
             return tr("Analyzed Key");
         case Column::StoredKey:
             return tr("Stored Key");
+        case Column::Theory:
+            return tr("Music Theory");
         case Column::Count:
             break;
     }
@@ -58,6 +60,8 @@ QVariant KeyAnalyzerResultsModel::data(const QModelIndex& index, int role) const
                 return result.analyzedKey;
             case Column::StoredKey:
                 return result.storedKey;
+            case Column::Theory:
+                return result.theoryNote;
             case Column::Count:
                 break;
         }
@@ -99,6 +103,8 @@ void KeyAnalyzerResultsModel::sort(int column, Qt::SortOrder order)
                 return a.analyzedKey < b.analyzedKey;
             case Column::StoredKey:
                 return a.storedKey < b.storedKey;
+            case Column::Theory:
+                return a.theoryNote < b.theoryNote;
             case Column::Count:
                 break;
         }
@@ -126,23 +132,61 @@ void KeyAnalyzerResultsModel::appendResult(const KeyResult& result)
     endInsertRows();
 }
 
+void KeyAnalyzerResultsModel::upsertResult(const KeyResult& result)
+{
+    for(int i = 0; i < m_results.size(); ++i) {
+        if(m_results.at(i).track.uniqueFilepath() == result.track.uniqueFilepath()) {
+            m_results[i] = result;
+            dataChanged(index(i, 0), index(i, columnCount() - 1));
+            return;
+        }
+    }
+    appendResult(result);
+}
+
+namespace {
+bool saveable(const KeyResult& r)
+{
+    if(r.status == KeyResult::Status::New || r.status == KeyResult::Status::Updated)
+        return true;
+    // Rows that were already saved remain re-saveable so that changing the
+    // "write to comment" option afterwards is applied on the next Save.
+    return r.status == KeyResult::Status::Skipped && !r.analyzedKey.isEmpty();
+}
+} // namespace
+
 QList<KeyResult> KeyAnalyzerResultsModel::resultsToSave() const
 {
     QList<KeyResult> out;
     for(const KeyResult& r : m_results) {
-        if(r.status == KeyResult::Status::New || r.status == KeyResult::Status::Updated)
+        if(saveable(r))
             out.append(r);
     }
     return out;
 }
 
-void KeyAnalyzerResultsModel::markSaved(const QSet<QString>& filepaths)
+QList<int> KeyAnalyzerResultsModel::savedRows() const
 {
+    QList<int> rows;
     for(int i = 0; i < m_results.size(); ++i) {
-        if(filepaths.contains(m_results.at(i).track.uniqueFilepath()))
-            m_results[i].status = KeyResult::Status::Skipped;  // reused as "saved" marker
+        if(saveable(m_results.at(i)))
+            rows.append(i);
     }
-    dataChanged(index(0, 0), index(m_results.size() - 1, columnCount() - 1));
+    return rows;
+}
+
+void KeyAnalyzerResultsModel::markSaved(const QList<int>& rows)
+{
+    if(rows.isEmpty())
+        return;
+    int top    = rows.first();
+    int bottom = rows.last();
+    for(int i : rows) {
+        m_results[i].status = KeyResult::Status::Skipped;  // reused as "saved" marker
+        top    = std::min(top, i);
+        bottom = std::max(bottom, i);
+    }
+    dataChanged(index(top, 0), index(bottom, columnCount() - 1));
 }
 
 const QList<KeyResult>& KeyAnalyzerResultsModel::results() const

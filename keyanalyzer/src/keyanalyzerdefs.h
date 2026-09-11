@@ -10,8 +10,6 @@
 
 #pragma once
 
-#include <core/coresettings.h>
-
 #include <QString>
 
 namespace Fooyin::KeyAnalyzer {

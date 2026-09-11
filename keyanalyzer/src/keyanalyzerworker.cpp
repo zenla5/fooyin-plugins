@@ -13,7 +13,6 @@
 #include "keyanalyzerdefs.h"
 #include "keyanalyzernotations.h"
 
-#include <core/coresettings.h>
 #include <core/engine/audiobuffer.h>
 #include <core/engine/audioconverter.h>
 #include <core/engine/audioformat.h>
@@ -24,8 +23,8 @@
 #include <keyfinder/keyfinder.h>
 
 #include <QObject>
+#include <QStringList>
 
-#include <algorithm>
 #include <vector>
 
 using namespace Qt::StringLiterals;
@@ -35,6 +34,31 @@ namespace Fooyin::KeyAnalyzer {
 namespace {
 
 constexpr int TargetSampleRate = 44100;
+
+// Linear-interpolation resampler. libkeyfinder's spectral analysis is tuned for
+// 44.1 kHz (detections shift at other rates), so files at any other sample
+// rate must be converted to TargetSampleRate before analysis. Audio::convert
+// does NOT resample, hence this small self-contained stage.
+void resampleToTarget(std::vector<float>& mono, int streamRate)
+{
+    if(mono.empty() || streamRate <= 0 || streamRate == TargetSampleRate)
+        return;
+
+    const double step  = static_cast<double>(streamRate) / TargetSampleRate;
+    const auto   nIn   = mono.size();
+    const auto   nOut  = static_cast<std::size_t>(std::ceil(static_cast<double>(nIn) * TargetSampleRate / streamRate));
+
+    std::vector<float> out;
+    out.reserve(nOut);
+    for(std::size_t i = 0; i < nOut; ++i) {
+        const double pos  = static_cast<double>(i) * step;
+        const auto   i0   = std::min<std::size_t>(static_cast<std::size_t>(pos), nIn - 1);
+        const auto   i1   = std::min<std::size_t>(i0 + 1, nIn - 1);
+        const double frac = pos - static_cast<double>(i0);
+        out.push_back(static_cast<float>(mono[i0] * (1.0 - frac) + mono[i1] * frac));
+    }
+    mono = std::move(out);
+}
 
 } // namespace
 
@@ -47,17 +71,9 @@ KeyAnalyzerWorker::KeyAnalyzerWorker(std::shared_ptr<AudioLoader> audioLoader)
 { }
 
 KeyResult KeyAnalyzerWorker::computeKey(const Track& track,
-                                        const QAtomicInt& cancelled) const
+                                        const QAtomicInt& cancelled,
+                                        const AnalysisOptions& options) const
 {
-    // ---- Read settings ----
-    FySettings settings;
-
-    const auto notation = static_cast<Notation>(
-        settings.value(QLatin1String{SettingNotation}, DefaultNotation).toInt());
-
-    const bool skipExisting =
-        settings.value(QLatin1String{SettingSkipExisting}, false).toBool();
-
     // ---- Build result stub ----
     KeyResult result;
     result.track = track;
@@ -70,7 +86,7 @@ KeyResult KeyAnalyzerWorker::computeKey(const Track& track,
     if(!comments.isEmpty())
         result.existingComment = comments.first();
 
-    if(skipExisting && !result.storedKey.isEmpty()) {
+    if(options.skipExisting && !options.force && !result.storedKey.isEmpty()) {
         result.status = KeyResult::Status::Skipped;
         return result;
     }
@@ -86,18 +102,22 @@ KeyResult KeyAnalyzerWorker::computeKey(const Track& track,
         return result;
     }
 
-    const AudioFormat fmt = loaded.format.value_or(AudioFormat{});
-    if(!fmt.isValid()) {
-        result.status      = KeyResult::Status::Error;
-        result.errorString = QObject::tr("Could not determine audio format");
-        return result;
-    }
-
     // ---- Decode and convert to mono float PCM ----
+    //
+    // Note: we deliberately do NOT rely on fooyin's Audio::convert to reduce
+    // the channel count. For a source with a channel layout, `setChannelCount(1)`
+    // gives the mono target a FrontCenter layout position that a stereo source
+    // lacks, so the converter's channel map resolves to -1 and every output
+    // sample stays zero (silence). Instead we convert to F32 *keeping the source
+    // channel count* (same layout -> identity map, like fooyin's own ebur128
+    // scanner) and downmix to mono ourselves.
+    //
+    // Audio::convert also does NOT resample, so we feed libkeyfinder the actual
+    // stream sample rate rather than assuming 44.1 kHz.
     loaded.decoder->start();
 
     std::vector<float> mono;
-    mono.reserve(static_cast<size_t>(fmt.sampleRate()) * 30);  // rough pre-alloc
+    int                streamRate = 0;
 
     constexpr size_t ChunkBytes = 65536;
     while(!cancelled.loadRelaxed()) {
@@ -105,19 +125,35 @@ KeyResult KeyAnalyzerWorker::computeKey(const Track& track,
         if(!buf.isValid() || buf.byteCount() == 0)
             break;
 
-        AudioFormat target = buf.format();
+        const AudioFormat sourceFmt = buf.format();
+        const int         channels  = sourceFmt.channelCount();
+        const int         rate      = sourceFmt.sampleRate();
+        if(streamRate == 0)
+            streamRate = rate;
+        if(channels <= 0)
+            continue;
+
+        // Convert sample format to F32, preserving channels & rate & layout.
+        AudioFormat target = sourceFmt;
         target.setSampleFormat(SampleFormat::F32);
-        target.setChannelCount(1);
-        target.setSampleRate(TargetSampleRate);
 
         const AudioBuffer converted = Audio::convert(buf, target);
         if(!converted.isValid())
             continue;
 
-        const auto span = converted.constData();
-        const auto *samples = reinterpret_cast<const float *>(span.data());
-        const size_t count  = span.size_bytes() / sizeof(float);
-        mono.insert(mono.end(), samples, samples + count);
+        const auto        span = converted.constData();
+        const float*      samples = reinterpret_cast<const float*>(span.data());
+        const std::size_t nFloats = span.size_bytes() / sizeof(float);
+        const std::size_t frames  = nFloats / static_cast<std::size_t>(channels);
+
+        const std::size_t base = mono.size();
+        mono.resize(base + frames);
+        for(std::size_t f = 0; f < frames; ++f) {
+            double acc = 0.0;
+            for(int c = 0; c < channels; ++c)
+                acc += samples[f * static_cast<std::size_t>(channels) + static_cast<std::size_t>(c)];
+            mono[base + f] = static_cast<float>(acc / channels);
+        }
     }
 
     loaded.decoder->stop();
@@ -133,6 +169,9 @@ KeyResult KeyAnalyzerWorker::computeKey(const Track& track,
         result.errorString = QObject::tr("No audio decoded");
         return result;
     }
+
+    // libkeyfinder is tuned for 44.1 kHz; resample any other rate to match.
+    resampleToTarget(mono, streamRate);
 
     // ---- Run libkeyfinder ----
     KeyFinder::AudioData audio;
@@ -151,7 +190,7 @@ KeyResult KeyAnalyzerWorker::computeKey(const Track& track,
         return result;
     }
 
-    const QString rendered = keyToNotation(key, notation);
+    const QString rendered = keyToNotation(key, options.notation);
     if(rendered.isEmpty()) {
         result.status      = KeyResult::Status::Error;
         result.errorString = QObject::tr("Unknown key detected");
@@ -159,6 +198,7 @@ KeyResult KeyAnalyzerWorker::computeKey(const Track& track,
     }
 
     result.analyzedKey = rendered;
+    result.theoryNote  = keyTheoryNote(key);
     result.status = result.storedKey.isEmpty() ? KeyResult::Status::New
                                                : KeyResult::Status::Updated;
     return result;

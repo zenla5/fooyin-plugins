@@ -10,6 +10,7 @@
 
 #include "keyanalyzerresults.h"
 
+#include "keyanalyzercomments.h"
 #include "keyanalyzerdefs.h"
 #include "keyanalyzerresultsmodel.h"
 #include "keyanalyzerscanner.h"
@@ -17,16 +18,21 @@
 #include <core/coresettings.h>
 #include <core/library/musiclibrary.h>
 
+#include <QApplication>
+#include <QClipboard>
 #include <QCloseEvent>
 #include <QFileInfo>
 #include <QGridLayout>
 #include <QHeaderView>
 #include <QHBoxLayout>
+#include <QItemSelectionModel>
 #include <QLabel>
+#include <QMenu>
 #include <QProgressBar>
 #include <QPushButton>
 #include <QSet>
 #include <QSortFilterProxyModel>
+#include <QStringList>
 #include <QTableView>
 
 using namespace Qt::StringLiterals;
@@ -47,6 +53,7 @@ KeyAnalyzerResults::KeyAnalyzerResults(MusicLibrary* library,
     , m_status{new QLabel(tr("Ready — %1 track(s) selected.").arg(m_tracks.size()), this)}
     , m_progressBar{new QProgressBar(this)}
     , m_analyzeButton{new QPushButton(tr("&Analyze"), this)}
+    , m_forceButton{new QPushButton(tr("Re-analyze (force)"), this)}
     , m_saveButton{new QPushButton(tr("&Save to Tags"), this)}
     , m_cancelButton{new QPushButton(tr("Cancel"), this)}
     , m_closeButton{new QPushButton(tr("Close"), this)}
@@ -67,6 +74,7 @@ KeyAnalyzerResults::KeyAnalyzerResults(MusicLibrary* library,
     m_resultsView->sortByColumn(static_cast<int>(KeyAnalyzerResultsModel::Column::Filename),
                                 Qt::AscendingOrder);
     m_resultsView->horizontalHeader()->setSectionResizeMode(QHeaderView::Interactive);
+    m_resultsView->setContextMenuPolicy(Qt::CustomContextMenu);
 
     m_saveButton->setEnabled(false);
     m_cancelButton->setEnabled(false);
@@ -78,7 +86,9 @@ KeyAnalyzerResults::KeyAnalyzerResults(MusicLibrary* library,
     m_progressBar->setVisible(false);
 
     QObject::connect(m_analyzeButton, &QPushButton::clicked,
-                     this, [this]() { startScan(); });
+                     this, [this]() { startScan(m_tracks, false, false); });
+    QObject::connect(m_forceButton, &QPushButton::clicked,
+                     this, [this]() { startScan(m_tracks, true, false); });
     QObject::connect(m_saveButton, &QPushButton::clicked,
                      this, &KeyAnalyzerResults::saveToTags);
     QObject::connect(m_cancelButton, &QPushButton::clicked,
@@ -88,6 +98,7 @@ KeyAnalyzerResults::KeyAnalyzerResults(MusicLibrary* library,
 
     auto* buttonLayout = new QHBoxLayout;
     buttonLayout->addWidget(m_analyzeButton);
+    buttonLayout->addWidget(m_forceButton);
     buttonLayout->addStretch();
     buttonLayout->addWidget(m_saveButton);
     buttonLayout->addWidget(m_cancelButton);
@@ -99,6 +110,8 @@ KeyAnalyzerResults::KeyAnalyzerResults(MusicLibrary* library,
     layout->addWidget(m_status,      2, 0);
     layout->addLayout(buttonLayout,  3, 0);
     layout->setRowStretch(0, 1);
+
+    setupContextMenu();
 }
 
 QSize KeyAnalyzerResults::sizeHint() const
@@ -106,23 +119,25 @@ QSize KeyAnalyzerResults::sizeHint() const
     return {720, 480};
 }
 
-void KeyAnalyzerResults::startScan()
+void KeyAnalyzerResults::startScan(const TrackList& tracks, bool force, bool merge)
 {
-    if(m_scanning || m_saving)
+    if(m_scanning || m_saving || tracks.empty())
         return;
 
     m_scanning = true;
     m_analyzeButton->setEnabled(false);
+    m_forceButton->setEnabled(false);
     m_saveButton->setEnabled(false);
     m_cancelButton->setEnabled(true);
 
-    const int total = static_cast<int>(m_tracks.size());
+    const int total = static_cast<int>(tracks.size());
     m_progressBar->setRange(0, total);
     m_progressBar->setValue(0);
     m_progressBar->setVisible(true);
     m_status->setText(tr("Analyzing…"));
 
-    m_resultsModel->setResults({});
+    if(!merge)
+        m_resultsModel->setResults({});
     m_scanStart = std::chrono::steady_clock::now();
 
     m_scanner = new KeyAnalyzerScanner(m_audioLoader, this);
@@ -138,15 +153,18 @@ void KeyAnalyzerResults::startScan()
                      });
 
     QObject::connect(m_scanner, &KeyAnalyzerScanner::trackScanned, this,
-                     [this](const KeyResult& result) {
-                         m_resultsModel->appendResult(result);
+                     [this, merge](const KeyResult& result) {
+                         if(merge)
+                             m_resultsModel->upsertResult(result);
+                         else
+                             m_resultsModel->appendResult(result);
                          m_resultsView->resizeColumnsToContents();
                      });
 
     QObject::connect(m_scanner, &KeyAnalyzerScanner::scanFinished,
                      this, &KeyAnalyzerResults::onScanFinished);
 
-    m_scanner->scanTracks(m_tracks);
+    m_scanner->scanTracks(tracks, force);
 }
 
 void KeyAnalyzerResults::onScanFinished(const QList<KeyResult>& /*results*/)
@@ -178,6 +196,10 @@ void KeyAnalyzerResults::saveToTags()
     if(toSave.isEmpty())
         return;
 
+    // Capture the exact model rows being saved so we never have to re-match
+    // rows by file-path string after the write (avoids a rename race).
+    const QList<int> saveRows = m_resultsModel->savedRows();
+
     FySettings settings;
     const bool writeInitKey =
         settings.value(QLatin1String{SettingWriteInitKey}, true).toBool();
@@ -200,23 +222,12 @@ void KeyAnalyzerResults::saveToTags()
             t.replaceExtraTag(QLatin1String{InitKeyTagField}, r.analyzedKey);
 
         if(writeComment) {
-            QString newComment;
-            switch(commentMode) {
-                case CommentMode::Overwrite:
-                    newComment = r.analyzedKey;
-                    break;
-                case CommentMode::AppendStart:
-                    newComment = r.existingComment.isEmpty()
-                        ? r.analyzedKey
-                        : r.analyzedKey + u" "_s + r.existingComment;
-                    break;
-                case CommentMode::AppendEnd:
-                    newComment = r.existingComment.isEmpty()
-                        ? r.analyzedKey
-                        : r.existingComment + u" "_s + r.analyzedKey;
-                    break;
-            }
-            t.replaceExtraTag(QLatin1String{CommentTagField}, newComment);
+            const QString newComment =
+                makeComment(commentMode, r.analyzedKey, r.existingComment);
+            // "COMMENT" is a standard field in fooyin (Tag::Comment); writing it
+            // as an extra tag gets dropped by normaliseExtraProperties() so the
+            // DB/UI comment would stay empty. Set the standard property instead.
+            t.setComment(newComment);
         }
 
         tracks.push_back(t);
@@ -248,16 +259,11 @@ void KeyAnalyzerResults::saveToTags()
 
     auto* watcher = new QFutureWatcher<WriteResult>(this);
     QObject::connect(watcher, &QFutureWatcher<WriteResult>::finished,
-                     this, [this, saved, toSave, watcher]() {
+                     this, [this, saved, toSave, saveRows, watcher]() {
                          const WriteResult result = watcher->result();
                          watcher->deleteLater();
 
-                         QSet<QString> targetPaths;
-                         targetPaths.reserve(toSave.size());
-                         for(const KeyResult& r : toSave)
-                             targetPaths.insert(r.track.uniqueFilepath());
-
-                         m_resultsModel->markSaved(targetPaths);
+                         m_resultsModel->markSaved(saveRows);
 
                          m_progressBar->setVisible(false);
                          m_saving = false;
@@ -290,12 +296,81 @@ void KeyAnalyzerResults::cancelActive()
 
 void KeyAnalyzerResults::setupContextMenu()
 {
+    m_resultsView->setContextMenuPolicy(Qt::CustomContextMenu);
+    QObject::connect(m_resultsView, &QWidget::customContextMenuRequested,
+                     this, &KeyAnalyzerResults::showContextMenu);
+}
+
+void KeyAnalyzerResults::showContextMenu(const QPoint& pos)
+{
+    const QModelIndex index = m_resultsView->indexAt(pos);
+    if(index.isValid() && !m_resultsView->selectionModel()->hasSelection())
+        m_resultsView->selectRow(index.row());
+
+    const bool hasSelection = !selectedTracks().empty();
+
+    auto* menu = new QMenu(this);
+    menu->setAttribute(Qt::WA_DeleteOnClose);
+
+    QAction* copyAction = menu->addAction(tr("Copy &Keys"));
+    copyAction->setEnabled(hasSelection);
+    QObject::connect(copyAction, &QAction::triggered,
+                     this, &KeyAnalyzerResults::copySelectedKeys);
+
+    QAction* retryAction = menu->addAction(tr("&Re-analyze Selected"));
+    retryAction->setEnabled(hasSelection && !m_scanning && !m_saving);
+    QObject::connect(retryAction, &QAction::triggered,
+                     this, &KeyAnalyzerResults::retrySelected);
+
+    menu->popup(m_resultsView->viewport()->mapToGlobal(pos));
+}
+
+TrackList KeyAnalyzerResults::selectedTracks() const
+{
+    TrackList out;
+    const QModelIndexList selected = m_resultsView->selectionModel()->selectedRows();
+    out.reserve(selected.size());
+    for(const QModelIndex& proxyIndex : selected) {
+        const QModelIndex sourceIndex = m_proxyModel->mapToSource(proxyIndex);
+        if(!sourceIndex.isValid() || sourceIndex.row() < 0
+           || sourceIndex.row() >= m_resultsModel->results().size())
+            continue;
+        out.push_back(m_resultsModel->results().at(sourceIndex.row()).track);
+    }
+    return out;
+}
+
+void KeyAnalyzerResults::copySelectedKeys()
+{
+    QStringList lines;
+    const QModelIndexList selected = m_resultsView->selectionModel()->selectedRows();
+    for(const QModelIndex& proxyIndex : selected) {
+        const QModelIndex sourceIndex = m_proxyModel->mapToSource(proxyIndex);
+        if(!sourceIndex.isValid() || sourceIndex.row() < 0
+           || sourceIndex.row() >= m_resultsModel->results().size())
+            continue;
+        const KeyResult& r = m_resultsModel->results().at(sourceIndex.row());
+        const QString key = r.analyzedKey.isEmpty() ? tr("(error)") : r.analyzedKey;
+        lines.append(QFileInfo{r.track.filepath()}.fileName() + u"\t"_s + key);
+    }
+    if(!lines.isEmpty())
+        QApplication::clipboard()->setText(lines.join(QLatin1Char('\n')));
+}
+
+void KeyAnalyzerResults::retrySelected()
+{
+    const TrackList selected = selectedTracks();
+    if(selected.empty())
+        return;
+    startScan(selected, true, true);
 }
 
 void KeyAnalyzerResults::updateButtons()
 {
-    const bool hasResults = !m_resultsModel->results().isEmpty();
-    m_saveButton->setEnabled(hasResults && !m_scanning && !m_saving);
+    const bool idle = !m_scanning && !m_saving;
+    m_analyzeButton->setEnabled(idle);
+    m_forceButton->setEnabled(idle);
+    m_saveButton->setEnabled(idle && !m_resultsModel->results().isEmpty());
 }
 
 void KeyAnalyzerResults::closeEvent(QCloseEvent* event)

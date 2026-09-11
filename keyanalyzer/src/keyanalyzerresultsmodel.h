@@ -14,7 +14,6 @@
 
 #include <QAbstractTableModel>
 #include <QList>
-#include <QSet>
 
 namespace Fooyin::KeyAnalyzer {
 
@@ -25,10 +24,11 @@ class KeyAnalyzerResultsModel : public QAbstractTableModel
 public:
     enum class Column
     {
-        Filename    = 0,
+        Filename     = 0,
         AnalyzedKey,
         StoredKey,
-        Count  // sentinel — keep last
+        Theory,       // music-theory note (quality + relative key)
+        Count         // sentinel — keep last
     };
 
     explicit KeyAnalyzerResultsModel(QList<KeyResult> results,
@@ -43,9 +43,14 @@ public:
 
     void setResults(QList<KeyResult> results);
     void appendResult(const KeyResult& result);
+    //! Insert @p result or update the row for the same track in place.
+    void upsertResult(const KeyResult& result);
 
     [[nodiscard]] QList<KeyResult> resultsToSave() const;
-    void markSaved(const QSet<QString>& filepaths);
+    //! Row indices (in model order) with a New/Updated state.
+    [[nodiscard]] QList<int> savedRows() const;
+    //! Mark the given model rows as saved.
+    void markSaved(const QList<int>& rows);
 
     [[nodiscard]] const QList<KeyResult>& results() const;
 

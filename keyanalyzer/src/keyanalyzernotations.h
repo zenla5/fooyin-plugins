@@ -32,4 +32,11 @@ const KeyMap &notationMap(Notation notation);
  */
 QString keyToNotation(KeyFinder::key_t key, Notation notation);
 
+/*!
+ * Render a human-friendly music-theory note for @p key, e.g.
+ * "C Major (rel. A minor)" or "A minor (rel. C major)".
+ * Returns an empty string for SILENCE.
+ */
+QString keyTheoryNote(KeyFinder::key_t key);
+
 } // namespace Fooyin::KeyAnalyzer

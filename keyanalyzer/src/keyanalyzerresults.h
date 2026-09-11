@@ -16,6 +16,7 @@
 
 #include <QDialog>
 #include <QList>
+#include <QPoint>
 
 #include <chrono>
 #include <functional>
@@ -23,6 +24,8 @@
 
 class QCloseEvent;
 class QLabel;
+class QMenu;
+class QPoint;
 class QProgressBar;
 class QPushButton;
 class QSortFilterProxyModel;
@@ -54,11 +57,18 @@ protected:
     void closeEvent(QCloseEvent* event) override;
 
 private:
-    void startScan();
+    //! Run a scan. When @p force, existing keys are ignored (re-analysis).
+    //! When @p merge, results are upserted into the model instead of clearing it.
+    void startScan(const TrackList& tracks, bool force, bool merge);
     void onScanFinished(const QList<KeyResult>& results);
     void saveToTags();
     void cancelActive();
     void setupContextMenu();
+    void showContextMenu(const QPoint& pos);
+    //! Tracks of the currently selected rows (proxy ordering).
+    [[nodiscard]] TrackList selectedTracks() const;
+    void copySelectedKeys();
+    void retrySelected();
     void updateButtons();
 
     MusicLibrary* m_library;
@@ -73,6 +83,7 @@ private:
     QLabel*                    m_status;
     QProgressBar*              m_progressBar;
     QPushButton*               m_analyzeButton;
+    QPushButton*               m_forceButton;
     QPushButton*               m_saveButton;
     QPushButton*               m_cancelButton;
     QPushButton*               m_closeButton;

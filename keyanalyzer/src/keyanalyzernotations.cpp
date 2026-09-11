@@ -10,9 +10,17 @@
 
 #include "keyanalyzernotations.h"
 
+#include <array>
+
+using namespace Qt::StringLiterals;
+
 namespace Fooyin::KeyAnalyzer {
 
 namespace {
+
+constexpr std::array<const char *, 12> ToneNames = {
+    "A", "Bb", "B", "C", "Db", "D", "Eb", "E", "F", "Gb", "G", "Ab"
+};
 
 const KeyMap &standardMap()
 {
@@ -93,6 +101,23 @@ QString keyToNotation(KeyFinder::key_t key, Notation notation)
     const KeyMap &map = notationMap(notation);
     const auto it = map.find(key);
     return it == map.cend() ? QString{} : it->second;
+}
+
+QString keyTheoryNote(KeyFinder::key_t key)
+{
+    if(key == KeyFinder::SILENCE || key < KeyFinder::A_MAJOR || key > KeyFinder::A_FLAT_MINOR)
+        return {};
+
+    const int pc            = key / 2;             // 0=A ... 11=Ab (even=Maj, odd=min)
+    const bool isMajor      = (key % 2) == 0;
+    const int relativePc    = isMajor ? ((pc - 3) + 12) % 12 : (pc + 3) % 12;
+
+    const QString tonic     = QString::fromLatin1(ToneNames[pc]);
+    const QString relTonic  = QString::fromLatin1(ToneNames[relativePc]);
+
+    if(isMajor)
+        return tonic + u" Major (rel. "_s + relTonic + u" minor)"_s;
+    return tonic + u" minor (rel. "_s + relTonic + u" major)"_s;
 }
 
 } // namespace Fooyin::KeyAnalyzer

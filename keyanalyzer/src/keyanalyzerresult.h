@@ -12,6 +12,8 @@
 
 #include <core/track.h>
 
+#include <keyfinder/constants.h>
+
 #include <QString>
 
 namespace Fooyin::KeyAnalyzer {
@@ -28,6 +30,7 @@ struct KeyResult
 
     Track   track;
     QString analyzedKey;   ///< The computed key in the selected notation (empty on error/skipped)
+    QString theoryNote;    ///< Music-theory note, e.g. "C Major (rel. A minor)"
     QString storedKey;     ///< Value from the existing INITIALKEY tag (may be empty)
     QString existingComment; ///< Existing comment (used to compute the new comment text)
     Status  status{Status::New};

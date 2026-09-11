@@ -43,10 +43,12 @@ void KeyAnalyzerScanner::close()
     m_watcher.cancel();
 }
 
-void KeyAnalyzerScanner::scanTracks(const TrackList& tracks)
+void KeyAnalyzerScanner::scanTracks(const TrackList& tracks, bool force)
 {
     m_cancelled.storeRelaxed(0);
 
+    // Read the analysis settings once on the calling thread; worker threads
+    // use the resolved options instead of touching QSettings themselves.
     FySettings settings;
     const bool autoThreads =
         settings.value(QLatin1String{SettingConcurrencyAuto}, false).toBool();
@@ -55,13 +57,20 @@ void KeyAnalyzerScanner::scanTracks(const TrackList& tracks)
         : std::max(1, settings.value(QLatin1String{SettingConcurrencyCount},
                                      DefaultConcurrencyCount).toInt());
 
+    AnalysisOptions options;
+    options.notation =
+        static_cast<Notation>(settings.value(QLatin1String{SettingNotation}, DefaultNotation).toInt());
+    options.skipExisting =
+        settings.value(QLatin1String{SettingSkipExisting}, false).toBool();
+    options.force = force;
+
     m_threadPool.setMaxThreadCount(threadCount);
 
     m_watcher.setFuture(QtConcurrent::mapped(
         &m_threadPool,
         tracks,
-        [this](const Track& track) -> KeyResult {
-            return m_worker->computeKey(track, m_cancelled);
+        [this, options](const Track& track) -> KeyResult {
+            return m_worker->computeKey(track, m_cancelled, options);
         }));
 }
 

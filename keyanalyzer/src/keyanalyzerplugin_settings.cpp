@@ -12,6 +12,8 @@
 
 #include "keyanalyzerdefs.h"
 
+#include <core/coresettings.h>
+
 #include <QCheckBox>
 #include <QComboBox>
 #include <QDialogButtonBox>

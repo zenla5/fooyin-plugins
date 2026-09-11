@@ -2,13 +2,17 @@ cmake_minimum_required(VERSION 3.16)
 
 project(
     keyanalyzer
-    VERSION 0.1.0
+    VERSION 0.2.0
     DESCRIPTION "Key Analyzer plugin for fooyin"
     HOMEPAGE_URL "https://forgejo.zenlab.vip/zenlab/fooyin-plugins"
     LANGUAGES CXX
 )
 
 set(CMAKE_CXX_STANDARD 20)
+
+# Dev-only optional targets (off for the nix derivation / normal releases).
+option(KEYANALYZER_BUILD_TOOLS "Build the keyanalyzer_cli verification tool" OFF)
+option(KEYANALYZER_BUILD_TESTS "Build the keyanalyzer unit tests" OFF)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 set(CMAKE_AUTOMOC ON)
@@ -45,6 +49,8 @@ create_fooyin_plugin(
     SOURCES src/keyanalyzerdefs.h
             src/keyanalyzernotations.h
             src/keyanalyzernotations.cpp
+            src/keyanalyzercomments.h
+            src/keyanalyzercomments.cpp
             src/keyanalyzerresult.h
             src/keyanalyzerworker.h
             src/keyanalyzerworker.cpp
@@ -59,3 +65,33 @@ create_fooyin_plugin(
             src/keyanalyzerplugin.h
             src/keyanalyzerplugin.cpp
 )
+
+# ---- Dev-only: unit tests (pure comment/notation logic; no fooyin) ----
+if(KEYANALYZER_BUILD_TESTS)
+    enable_testing()
+    add_executable(keyanalyzer_test_comments
+        tests/test_comments.cpp
+        src/keyanalyzercomments.cpp
+    )
+    target_include_directories(keyanalyzer_test_comments PRIVATE src)
+    target_link_libraries(keyanalyzer_test_comments PRIVATE Qt6::Core)
+    target_compile_features(keyanalyzer_test_comments PRIVATE cxx_std_20)
+    add_test(NAME comments COMMAND keyanalyzer_test_comments)
+endif()
+
+# ---- Dev-only: headless pipeline verifier ----
+if(KEYANALYZER_BUILD_TOOLS)
+    find_package(taglib CONFIG REQUIRED)
+    add_executable(keyanalyzer_cli
+        tools/keyanalyzer_cli.cpp
+        src/keyanalyzernotations.cpp
+        src/keyanalyzercomments.cpp
+    )
+    target_include_directories(keyanalyzer_cli PRIVATE src)
+    target_link_libraries(keyanalyzer_cli PRIVATE
+        Qt6::Core
+        KeyFinder::keyfinder
+        TagLib::tag
+    )
+    target_compile_features(keyanalyzer_cli PRIVATE cxx_std_20)
+endif()
