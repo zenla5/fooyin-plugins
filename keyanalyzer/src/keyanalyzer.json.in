@@ -1,0 +1,10 @@
+{
+    "Name": "Key Analyzer",
+    "Version": "@Fooyin_VERSION@",
+    "Author": "zenlab",
+    "Copyright": "",
+    "License": ["GPL v3"],
+    "Category": "Tools",
+    "Description": "Detect the musical key of selected tracks (libkeyfinder) and write it as Camelot, Open Key or Standard notation to the INITIALKEY and/or Comment tag.",
+    "Url": "https://forgejo.zenlab.vip/zenlab/fooyin-plugins"
+}
