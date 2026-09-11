@@ -4,7 +4,7 @@ project(
     keyanalyzer
     VERSION 0.2.0
     DESCRIPTION "Key Analyzer plugin for fooyin"
-    HOMEPAGE_URL "https://forgejo.zenlab.vip/zenlab/fooyin-plugins"
+    HOMEPAGE_URL "https://github.com/zenla5/fooyin-plugins"
     LANGUAGES CXX
 )
 

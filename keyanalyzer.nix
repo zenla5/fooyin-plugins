@@ -60,7 +60,7 @@ stdenv.mkDerivation {
   '';
 
   meta = with lib; {
-    homepage = "https://forgejo.zenlab.vip/zenlab/fooyin-plugins";
+    homepage = "https://github.com/zenla5/fooyin-plugins";
     description = "In-GUI musical key analyzer (Camelot/Open Key/Standard) for the fooyin player, using libkeyfinder";
     longDescription = ''
       Adds a "Utilities -> Key Analyzer..." action to fooyin that detects the

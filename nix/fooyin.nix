@@ -1,7 +1,7 @@
 # Build fooyin from git WITH public development headers + exported CMake config.
 #
 # This MUST stay byte-identical to the `fooyin` overlay in the NixOS host repo
-# (zenlab/NixOS-T570, flake.nix) — same nixpkgs rev, same git commit, same
+# (maintained on the NixOS host) — same nixpkgs rev, same git commit, same
 # flags, same postFixup. That way the derivation's store path matches the one
 # already built on the machine, and `nix develop`/`nix build` here reuse the
 # cache instead of recompiling fooyin (~40 min).

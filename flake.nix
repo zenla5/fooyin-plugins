@@ -3,7 +3,7 @@
 
   inputs = {
     # Pin to the exact nixpkgs revision used by the NixOS host
-    # (zenlab/NixOS-T570, see its flake.lock). Matching the revision makes
+    # (see its flake.lock). Matching the revision makes
     # every store path here (fooyin-from-git dev build, libkeyfinder, Qt, ...)
     # equal the ones already cached on the machine, so `nix develop` and
     # `nix build` reuse the cache instead of rebuilding ~40 min of fooyin.

@@ -9,8 +9,9 @@ NixOS host so you don't have to rediscover them.
 
 ## Environment
 
-- Runs on the T570 (NixOS 26.05), user `zenlab`, hostname `t570`.
-- The NixOS host (separate repo `zenlab/NixOS-T570`) builds fooyin **from git**
+- The dev host runs NixOS; the machine-specific setup (fooyin dev build caching)
+  is documented below.
+- The NixOS host builds fooyin **from git**
   (commit `8b80f417e83d40c7906a9801a4e3794a567e0ead`) with `INSTALL_HEADERS=ON`
   and consumes THIS repo via `overlays.default`. The host overrides `fooyin`
   to that git dev build; the plugin therefore must compile against a **fooyin

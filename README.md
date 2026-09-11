@@ -79,6 +79,8 @@ This repo is a flake. It exposes:
 
 ### Publishing
 
-The plan is to eventually publish this on GitHub so others can use the Key
-Analyzer the same way the BPM Analyzer plugin is used. When ready: create a
-GitHub mirror and point the flake/consumer at it.
+This repo is hosted publicly at
+[https://github.com/zenla5/fooyin-plugins](https://github.com/zenla5/fooyin-plugins),
+so anyone can consume the Key Analyzer the same way the BPM Analyzer plugin is
+used. Releases are tagged `v0.x.y`; consumers pin via
+`nix flake lock --update-input fooyin-plugins`.
