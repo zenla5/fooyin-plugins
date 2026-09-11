@@ -1,0 +1,73 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build keyanalyzer
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Single-user (daemonless) nix so `actions/cache` can restore the whole
+      # /nix store safely (no running daemon holding the store DB during
+      # restore). This is what lets us reuse the ~40 min fooyin-from-git dev
+      # build across runs on a clean runner with no host store cache.
+      - uses: cachix/install-nix-action@v30
+        with:
+          nix_install_args: "--no-daemon"
+
+      # Cache the nix store keyed on flake.lock (the pinned nixpkgs revision).
+      # save-always keeps partial/fooyin builds even if the plugin step fails.
+      - uses: actions/cache@v4
+        with:
+          path: /nix
+          key: ${{ runner.os }}-nix-${{ hashFiles('flake.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-nix-
+          save-always: true
+
+      # Self-contained package: builds nix/fooyin.nix itself. No --impure
+      # needed (the devShell's builtins.pathExists host-cache trick is dev-only).
+      - name: Build plugin via nix
+        run: nix build .#keyanalyzer
+
+      - name: Stage artifact
+        run: |
+          mkdir -p dist
+          cp result/lib/fyplugin_keyanalyzer.so dist/
+          ls -la dist/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: fyplugin_keyanalyzer-${{ github.ref_name }}.so
+          path: dist/fyplugin_keyanalyzer.so
+          if-no-files-found: error
+
+  release:
+    name: Attach binaries to Release
+    runs-on: ubuntu-latest
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: fyplugin_keyanalyzer-${{ github.ref_name }}.so
+          path: dist
+
+      # Creates the release for the tag if it doesn't exist, or updates it;
+      # attaches the prebuilt plugin .so to it.
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: dist/fyplugin_keyanalyzer.so
+          generate_release_notes: true
